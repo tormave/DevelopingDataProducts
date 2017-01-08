@@ -1,0 +1,87 @@
+---
+title: "Week 2 Assignment - Leaflet map"
+date: "1/8/2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(leaflet)
+library(dplyr)
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE)
+```
+First, run code to download data of country centerpoints and populations, and then merge these into one data frame. As the former was using 2-letter country codes and the latter 3-letter ones, a third file was merged to map from one abbreviation to another. Finally, countries were divided into 4 quantiles by population, and a color was stored in the data frame to represent the quantile.
+```{r echo = FALSE}
+# coordinates
+destfile <- "country_centroids_primary.csv"
+if (!file.exists(destfile)) {
+  download.file("http://gothos.info/resource_files/country_centroids.zip",
+                "country_centroids.zip",
+                method="curl")
+  unzip("country_centroids.zip", c(destfile))
+}
+country_centers <- read.delim(destfile,
+                              header = TRUE,
+                              sep = "\t",
+                              quote = "\"",
+                              dec = ".",
+                              fill = TRUE,
+                              comment.char = "")
+
+# country code mapping
+destfile <- "country_codes.csv"
+if (!file.exists(destfile)) {
+  download.file("https://commondatastorage.googleapis.com/ckannet-storage/2011-11-25T132653/iso_3166_2_countries.csv",
+                "country_codes.csv",
+                method="curl")
+}
+country_codes <- read.table("country_codes.csv",
+                            sep=",",
+                            header = TRUE,
+                            quote = "\"",
+                            fill = TRUE)
+countries <- merge(country_centers[, c("LAT", "LONG", "SHORT_NAME", "ISO3136")],
+                   country_codes[, c("ISO.3166.1.3.Letter.Code", "ISO.3166.1.2.Letter.Code")],
+                   by.x = "ISO3136",
+                   by.y = "ISO.3166.1.2.Letter.Code")
+
+# population data
+destfile <- "API_SP.POP.TOTL_DS2_en_csv_v2.csv"
+if (!file.exists(destfile)) {
+  download.file("http://api.worldbank.org/v2/en/indicator/SP.POP.TOTL?downloadformat=csv",
+                "populations.zip",
+                method="curl")
+  unzip("populations.zip", c(destfile))
+}
+country_populations <- read.table("API_SP.POP.TOTL_DS2_en_csv_v2.csv",
+                                  sep=",",
+                                  header = TRUE,
+                                  fill = TRUE,
+                                  skip = 4)
+countries <- merge(countries,
+                   country_populations[, c("Country.Code", "X2015")],
+                   by.x = "ISO.3166.1.3.Letter.Code",
+                   by.y = "Country.Code")
+colnames(countries) <- c("code-3", "code-2", "lat", "lng", "name", "population")
+countries$quant <- ntile(countries$population, 4)
+colors <- data.frame(quant = c(1, 2, 3, 4),
+                     color = c("#0033CC", "#003399", "#003355", "#003322"),
+                     legend_text = c("25%", "50%", "75%", "100%"))
+countries <- merge(countries, colors, by = "quant")
+
+kable(head(countries, 4), digits=2)
+```
+
+Secondly, generate the map, and draw circles in the geographic country centers representing the absolute population (size), and the population quartile (color). By clicking the circle the a popup is shown with country name and population.
+``` {r echo = FALSE, message = FALSE}
+countries %>%
+  leaflet() %>%
+  addTiles() %>%
+  addCircles(weight = 1,
+             radius = sqrt(countries$population) * 50,
+             popup = paste(countries$name, "-", prettyNum(countries$population,
+                                                          big.mark = ",",
+                                                          preserve.width = "none")),
+             color = countries$color) %>%
+  addLegend(labels = colors$legend_text, colors = colors$color)
+```
