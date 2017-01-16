@@ -1,0 +1,84 @@
+---
+title: "Plotly on Rmd slides"
+author: "Vesa Tormanen"
+date: "1/15/2017"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+library(plotly)
+library(dplyr)
+library(knitr)
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## A table
+
+The code fetches population and position data for all countries.
+
+Example:
+```{r echo = FALSE}
+# coordinates
+destfile <- "country_centroids_primary.csv"
+if (!file.exists(destfile)) {
+  download.file("http://gothos.info/resource_files/country_centroids.zip",
+                "country_centroids.zip",
+                method="curl")
+  unzip("country_centroids.zip", c(destfile))
+}
+country_centers <- read.delim(destfile,
+                              header = TRUE,
+                              sep = "\t",
+                              quote = "\"",
+                              dec = ".",
+                              fill = TRUE,
+                              comment.char = "")
+
+# country code mapping
+destfile <- "country_codes.csv"
+if (!file.exists(destfile)) {
+  download.file("https://commondatastorage.googleapis.com/ckannet-storage/2011-11-25T132653/iso_3166_2_countries.csv",
+                "country_codes.csv",
+                method="curl")
+}
+country_codes <- read.table("country_codes.csv",
+                            sep=",",
+                            header = TRUE,
+                            quote = "\"",
+                            fill = TRUE)
+countries <- merge(country_centers[, c("LAT", "LONG", "SHORT_NAME", "ISO3136")],
+                   country_codes[, c("ISO.3166.1.3.Letter.Code", "ISO.3166.1.2.Letter.Code")],
+                   by.x = "ISO3136",
+                   by.y = "ISO.3166.1.2.Letter.Code")
+
+# population data
+destfile <- "API_SP.POP.TOTL_DS2_en_csv_v2.csv"
+if (!file.exists(destfile)) {
+  download.file("http://api.worldbank.org/v2/en/indicator/SP.POP.TOTL?downloadformat=csv",
+                "populations.zip",
+                method="curl")
+  unzip("populations.zip", c(destfile))
+}
+country_populations <- read.table("API_SP.POP.TOTL_DS2_en_csv_v2.csv",
+                                  sep=",",
+                                  header = TRUE,
+                                  fill = TRUE,
+                                  skip = 4)
+countries <- merge(countries,
+                   country_populations[, c("Country.Code", "X2015")],
+                   by.x = "ISO.3166.1.3.Letter.Code",
+                   by.y = "Country.Code")
+colnames(countries) <- c("code-3", "code-2", "lat", "lng", "name", "population")
+countries$quant <- ntile(countries$population, 4)
+colors <- data.frame(quant = c(1, 2, 3, 4),
+                     legend_text = c("25%", "50%", "75%", "100%"))
+countries <- merge(countries, colors, by = "quant")
+kable(head(countries, 4), digits=2)
+```
+
+## A plot
+``` {r echo = FALSE, message = FALSE, warning = FALSE}
+plot_ly(countries, x = ~lat, y = ~population,
+        type = "scatter", mode = "markers", color = ~legend_text) %>%
+  layout(yaxis = list(type = "log"))
+```
