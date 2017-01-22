@@ -1,0 +1,119 @@
+---
+title: "Simple climate model"
+author: "Vesa Tormanen"
+date: "1/22/2017"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+library(ggplot2)
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+## Simple climate model
+
+App link: https://tormave.shinyapps.io/climate/
+
+There's a large scientific consensus about global warming having been caused by the raising CO2 levels. However, most people (including me before the Data Science Specialization) are not statisticians. As there are other factors effecting the global temperatures, how clear is the temperature - CO2 level correlation really?
+
+I set to find this out.
+
+## Data sources
+
+- Temperatures from NASA: https://data.giss.nasa.gov/gistemp/
+- Pre-1959 CO2 levels from NOAA: https://www.ncdc.noaa.gov/data-access/paleoclimatology-data/datasets/ice-core
+- Post-1959 CO2 levels US Earth System Research Lab: http://data.okfn.org/data/core/co2-ppm
+- Sun spot data from SILSO: http://www.sidc.be/silso/
+- Volcanic eruptions from NOAA: https://www.ngdc.noaa.gov/nndc/servlet/ShowDatasets?dataset=102557&search_look=50&display_look=50
+
+Combining the records resulted in one data frame with records from 1880 to 2016.
+
+## Resulting data frame
+
+This is what the combined data looks like after adding prediction and confidence intervals:
+```{r cars, echo = FALSE, warning = FALSE}
+library(shiny)
+library(dplyr)
+library(ggplot2)
+
+loadFile <- function(url, destFile, type = "CSV", ...) {
+  data = NULL
+  if (!file.exists(destFile))
+    download.file(url, destFile, method = "curl")
+  if (type == "CSV")
+    data = read.csv(destFile, ...)
+  else if (type == "TXT")
+    data = read.table(destFile, sep = "", ...)
+  
+  data
+}
+
+
+if (!exists("climate_df")) { # load data and construct data frame
+  temps <- loadFile("https://data.giss.nasa.gov/gistemp/graphs_v3/Fig.A2.txt",
+                    "temps.txt",
+                    "TXT",
+                    skip = 4,
+                    nrows = 137,
+                    col.names = c("year", "temp", "temp_5"))
+  temps <- temps[, c("year", "temp")]
+
+  co2_59 = loadFile("https://raw.githubusercontent.com/datasets/co2-ppm/master/data/co2-annmean-mlo.csv",
+                    "co2-annmean-mlo.csv")
+  co2_59 <- co2_59[, c("Year", "Mean")]
+  names(co2_59) <- c("year", "co2") # CO2 data pre-1959
+    
+  co2 <- loadFile("ftp://ftp.ncdc.noaa.gov/pub/data/paleo/icecore/antarctica/law/law2006.txt",
+                  "law2006.txt",
+                  "TXT",
+                  skip = 182,
+                  nrows = 1959,
+                  header = TRUE)
+  co2 <- co2[co2$YearAD >= 1880, c("YearAD", "CO2spl")]
+  names(co2) <- c("year", "co2")
+  co2 <- rbind(co2, co2_59) # Combine old and new for duration of temp measurements
+    
+  sunspots <- loadFile("http://www.sidc.be/silso/INFO/snytotcsv.php",
+                      "sunspots.csv",
+                      "CSV",
+                      sep = ";",
+                      skip = 179,
+                      col.names = c("year", "sunspots", "stdev", "obs", "prov"))
+  sunspots <- data.frame(year = as.integer(sunspots$year)-1, sunspots = sunspots$sunspots)
+    
+  volcanoes <- loadFile("https://www.ngdc.noaa.gov/nndc/struts/results?type_0=Exact&query_0=$HAZ_EVENT_ID&t=102557&s=50&d=54&dfn=volerup.txt",
+                        "volcanoes.tsv",
+                        "CSV",
+                        sep = "\t")
+  volcanoes <- volcanoes %>%
+    filter(Year >= 1880 & !is.na(VEI)) %>%
+    select(Year, VEI) %>%
+    group_by(Year) %>%
+    summarize(eruptions = sum(10 ^ VEI))
+  names(volcanoes) <- c("year", "eruptions")
+    
+  climate_df <- merge(temps, co2, by = "year")
+  climate_df <- merge(climate_df, sunspots, by = "year")
+  climate_df <- merge(climate_df, volcanoes, by = "year", all.x = TRUE)
+  climate_df$eruptions[is.na(climate_df$eruptions)] <- 0
+}  
+
+climate_fit <- lm ("temp ~ co2 + sunspots + eruptions", data = climate_df)
+df <- cbind(climate_df, predict(climate_fit, interval = "prediction")) 
+kable(head(df, 6), digits=2)
+```
+
+## Resulting plot with all 3 predictors.
+
+```{r echo = FALSE, warning = FALSE}
+ggplot(df, aes(x = year)) + 
+  geom_point(aes(y = temp)) +
+  xlab("Year") +
+  ylab("Temperature") +
+  geom_ribbon(aes(ymin = lwr, ymax = upr), 
+                  fill = "blue", alpha = 0.2) + 
+  geom_line(aes(y = fit), colour = "blue", size = 1)
+```
+Model fit is quite astonishing. Go to https://tormave.shinyapps.io/climate/ and try it yourself!
